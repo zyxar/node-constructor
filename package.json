@@ -11,11 +11,11 @@
     "type": "git",
     "url": "git://github.com/jheusala/node-builder.git"
   },
-  "keywords": {
+  "keywords": [
     "build",
     "standalone",
     "third_party_main"
-  },
+  ],
   "author": "Jaakko-Heikki Heusala",
   "contributors": [
     {
