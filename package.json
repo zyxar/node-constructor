@@ -4,7 +4,8 @@
   "description": "Simple script to build Node.js JavaScript code into binary executable",
   "main": "index.js",
   "dependencies": {
-    "optimist": "*"
+    "optimist": "*",
+    "log4js"
   },
   "devDependencies": {},
   "repository": {

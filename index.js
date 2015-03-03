@@ -15,109 +15,108 @@
   var path = require('path');
 
   var optimist = require('optimist');
+  var log4js = require('log4js');
+  log4js.configure({
+    appenders: [{
+      type: 'console',
+      layout: {
+        type: 'pattern',
+        pattern: '%d  - %p: %c - %m',
+        replaceConsole: true
+      }
+    }]
+  });
+  var log = log4js.getLogger();
 
   // Parse arguments
   var args = optimist.usage('Usage: $0 [-q] [--tmpdir=DIR] -o FILE [file(s)]')
     .default('o', 'a.out')
     .default('tmpdir', './tmp')
+    .default('installdir', './tmp')
+    .default('prefix', 'install')
+    .default('log', 'INFO')
     .default('ver', '0.10.36')
     .demand(['o'])
     .argv;
 
   var source_files = args._;
-  if (source_files.length === 0) return console.error('You need to specify at least one script file.');
-  var quiet = args.q;
+  if (source_files.length === 0) return log.error('You need to specify at least one js file.');
+
+  log.setLevel(args.log.toUpperCase());
 
   /* Async preparation for directory */
-  function prep_dir(name, next) {
-    if (!quiet) console.log('Preparing directory ' + name);
-    fs.exists(name, function(exists) {
+  function prep_dir (name, next) {
+    log.trace('Preparing directory ' + name);
+    fs.exists(name, function (exists) {
       if (exists) return next();
-      fs.mkdir(name, '0700', function(err) {
+      fs.mkdir(name, '0700', function (err) {
         next(err);
       });
     });
   }
 
   /* Async preparation for remote files */
-  function prep_distfiles(distfile, tofile, next) {
-    if (!quiet) console.log('Preparing distfile ' + distfile + ' to ' + tofile);
-    fs.exists(tofile, function(exists) {
-      if (exists) return next();
-      if (!quiet) console.log('Downloading ' + distfile + ' to ' + tofile);
-      var wget = child_process.spawn('wget', ['-O', tofile, distfile]);
-      wget.stdin.end();
-      if (!quiet) wget.stdout.on('data', function(data) {
-        console.log('' + data);
-      });
-      if (!quiet) wget.stderr.on('data', function(data) {
-        console.log('' + data);
-      });
-      wget.on('exit', function(code) {
-        if (code !== 0) next(new TypeError('wget exited with code ' + code));
-        next();
+  function prep_distfiles (distfile, tofile, next) {
+    log.trace('Preparing distfile ' + distfile + ' to ' + tofile);
+    fs.exists(tofile, function (exists) {
+      if (exists) {
+        log.info(tofile, 'exists.');
+        // checksum
+        return next();
+      }
+      log.debug('Downloading ' + distfile + ' to ' + tofile);
+      doexec('wget', ['-O', tofile, distfile], function (err) {
+        next(err);
       });
     });
-  }
-
-  /* Async check file md5sum */
-  function check_md5sum(name, sum, next) {
-    if (!quiet) console.log('Checking md5sum for ' + name + ' ... [NOT IMPLEMENTED!]');
-    next();
   }
 
   /* For make & make install etc */
-  function doexec(name, cmdargs, next) {
-    if (!quiet) console.log('Running ' + name + ' ' + cmdargs.join(' ') + '...');
+  function doexec (name, cmdargs, next) {
     var c = child_process.spawn(name, cmdargs);
-    c.stdin.end();
-    if (!quiet) c.stdout.on('data', function(data) {
-      console.log('' + data);
+    var stdout = '';
+    var stderr = '';
+    c.stdout.on('data', function (data) {
+      stdout += data;
     });
-    if (!quiet) c.stderr.on('data', function(data) {
-      console.log('' + data);
+    c.stderr.on('data', function (data) {
+      stderr += data;
     });
-    c.on('exit', function(code) {
-      if (code !== 0) next(new TypeError(name + ' exited with code ' + code));
+    c.on('exit', function (code) {
+      if (stdout) log.debug(stdout);
+      if (stderr) log.debug(stderr);
+      if (code !== 0) return next(new TypeError(name + ' exited with code ' + code));
       next();
     });
+    c.stdin.end();
   }
 
   /* Async unpack tar.gz */
-  function prep_unpack_tgz(name, dir, next) {
-    if (!quiet) console.log('Checking ' + dir + '/configure...');
-    fs.exists(dir + '/configure', function(exists) {
+  function prep_unpack_tgz (name, dir, next) {
+    fs.exists(dir + '/configure', function (exists) {
       if (exists) return next();
-      if (!quiet) console.log('Unpacking ' + name + ' to ' + dir);
-      var tar = child_process.spawn('tar', ['--strip-components=1', '-C', dir, '-zxf', name]);
-      if (!quiet) tar.stdout.on('data', function(data) {
-        console.log('' + data);
-      });
-      if (!quiet) tar.stderr.on('data', function(data) {
-        console.log('' + data);
-      });
-      tar.on('exit', function(code) {
-        if (code !== 0) next(new TypeError('tar exited with code ' + code));
-        next();
+      log.debug('Unpacking ' + name + ' to ' + dir);
+      doexec('tar', ['--strip-components=1', '-C', dir, '-xf', name], function (err) {
+        next(err);
       });
     });
   }
 
   /* Async preparation for source files */
-  function prep_source_files(srcdir, files, next) {
-    if (!quiet) console.log('Preparing source files into ' + srcdir + '...');
+  function prep_source_files (srcdir, files, next) {
+    log.trace('Preparing source files into ' + srcdir + '...');
     var file = files[0];
-    if (!file) next('no files!');
-    fs.readFile(srcdir + '/node.gyp', 'utf8', function(err, data) {
-      if (err) return console.error('Could not read node.gyp: ' + err);
+    if (!file) return next('no files!');
+    fs.readFile(path.resolve(srcdir, 'node.gyp'), 'utf8', function (err, data) {
+      if (err) return log.error('Could not read node.gyp: ' + err);
       data = data.replace(
-        '\'lib/_linklist.js\',',
-        '\'lib/_linklist.js', 'lib/_third_party_main.js\','
+        /'lib\/zlib\.js'\,\n/,
+        '\'lib/zlib.js\', \'lib/_third_party_main.js\',\n'
       );
-      fs.writeFile(srcdir + '/node.gyp', data, 'utf8', function(err) {
-        if (err) return console.error('Could not write node.gyp: ' + err);
-        doexec('cp', ['-f', file, srcdir + '/lib/_third_party_main.js'], function(err) {
-          if (err) return console.error('Could not prepare _third_party_main.js: ' + err);
+      fs.writeFile(srcdir + '/node.gyp', data, 'utf8', function (err) {
+        if (err) return log.error('Could not write node.gyp: ' + err);
+        doexec('cp', ['-f', file, srcdir + '/lib/_third_party_main.js'], function (err) {
+          if (err) return log.error('Could not prepare _third_party_main.js: ' + err);
           next();
         });
       });
@@ -125,8 +124,8 @@
   }
 
   /* Change directory */
-  function chdir(dir, next) {
-    if (!quiet) console.log('Changing to directory: ' + dir);
+  function chdir (dir, next) {
+    log.debug('Changing to directory: ' + dir);
     try {
       process.chdir(dir);
       next();
@@ -136,20 +135,19 @@
   }
 
   /* Compile node */
-  function compile_node(srcdir, installdir, prefix, next) {
-    if (!quiet) console.log('Preparing destdir... ');
-    doexec('mkdir', ['-p', installdir + prefix], function(err) {
-      if (err) return console.error('Could prepare destdir: ' + err);
-      if (!quiet) console.log('Changing to ' + srcdir + '... ');
-      chdir(srcdir, function(err) {
-        if (err) return console.error('Could change directory: ' + err);
-        doexec('./configure', ['--prefix=' + prefix], function(err) {
-          if (err) return console.error('Could not configure: ' + err);
-          doexec('make', [], function(err) {
-            if (err) return console.error('Could not make: ' + err);
-            if (!quiet) console.log('Installing to ' + installdir + '... ');
-            doexec('make', ['DESTDIR=' + installdir, 'install'], function(err) {
-              if (err) return console.error('Could not make install: ' + err);
+  function compile_node (srcdir, installdir, prefix, next) {
+    log.info('Compiling node binary ...');
+    var dir = path.resolve(installdir);
+    doexec('mkdir', ['-p', path.resolve(installdir, prefix)], function (err) {
+      if (err) return log.error('Could prepare destdir: ' + err);
+      chdir(srcdir, function (err) {
+        if (err) return log.error('Could change directory: ' + err);
+        doexec('./configure', ['--prefix=' + prefix], function (err) {
+          if (err) return log.error('Could not configure: ' + err);
+          doexec('make', [], function (err) {
+            if (err) return log.error('Could not make: ' + err);
+            doexec('make', ['DESTDIR=' + dir, 'install'], function (err) {
+              if (err) return log.error('Could not make install: ' + err);
               next();
             });
           });
@@ -159,40 +157,36 @@
   }
 
   /* Async preparation for output file */
-  function prep_output_file(bindir, outfile, next) {
-    if (!quiet) console.log('Installing to ' + outfile + '...');
-    doexec('cp', ['-f', bindir + '/node', outfile], function(err) {
+  function prep_output_file (bindir, outfile, next) {
+    log.info('Installing to ' + outfile + ' ...');
+    doexec('cp', ['-f', bindir + '/node', outfile], function (err) {
       if (err) return next('Could not install ' + outfile + ': ' + err);
       next();
     });
   }
 
   /* Async builder cycle */
-  if (!quiet) console.log('Building... ');
   var outputfile = path.resolve(path.normalize(args.o));
-  var prefix = '/opt/node';
   var tmpdir = path.resolve(path.normalize(args.tmpdir));
-  prep_dir(tmpdir, function(err) {
-    if (err) return console.error('Could not prepare: ' + tmpdir + ': ' + err);
-    var sourcefile = tmpdir + '/node.tar.gz';
-    prep_distfiles(args.distfile, sourcefile, function(err) {
-      if (err) return console.error('Could not prepare: ' + args.distfile + ' to ' + sourcefile + ': ' + err);
-      check_md5sum(sourcefile, 'a2a6a6699e275a30f6047b1f33281a77', function(err) {
-        if (err) return console.error('Hash failed for ' + sourcefile);
-        var distdir = tmpdir + '/node';
-        var installdir = tmpdir + '/destdir';
-        prep_dir(distdir, function(err) {
-          if (err) return console.error('Could not prepare: ' + distdir + ': ' + err);
-          prep_unpack_tgz(sourcefile, distdir, function(err) {
-            if (err) return console.error('Unpack failed for ' + sourcefile + ': ' + err);
-            prep_source_files(distdir, source_files, function(err) {
-              if (err) return console.error('Preparing for source files failed: ' + err);
-              compile_node(distdir, installdir, prefix, function(err) {
-                if (err) return console.error('Compiling node failed: ' + err);
-                prep_output_file(installdir + prefix + '/bin', outputfile, function(err) {
-                  if (err) return console.error('Installing binary failed: ' + err);
-                  if (!quiet) console.log('OK!');
-                });
+  var bindir = path.resolve(args.installdir, args.prefix, 'bin');
+  prep_dir(tmpdir, function (err) {
+    if (err) return log.error('Could not prepare: ' + tmpdir + ': ' + err);
+    var sourcefile = tmpdir + '/node-v'+args.ver+'.tar.gz';
+    var distfile = 'http://nodejs.org/dist/v'+args.ver+'/node-v'+args.ver+'.tar.gz';
+    prep_distfiles(distfile, sourcefile, function (err) {
+      if (err) return log.error('Could not prepare: ' + args.distfile + ' to ' + sourcefile + ': ' + err);
+      var distdir = path.resolve(tmpdir, 'node-v'+args.ver);
+      prep_dir(distdir, function (err) {
+        if (err) return log.error('Could not prepare: ' + distdir + ': ' + err);
+        prep_unpack_tgz(sourcefile, distdir, function (err) {
+          if (err) return log.error('Unpack failed for ' + sourcefile + ': ' + err);
+          prep_source_files(distdir, source_files, function (err) {
+            if (err) return log.error('Preparing for source files failed: ' + err);
+            compile_node(distdir, args.installdir, args.prefix, function (err) {
+              if (err) return log.error('Compiling node failed: ' + err);
+              prep_output_file(bindir, outputfile, function (err) {
+                if (err) return log.error('Installing binary failed: ' + err);
+                log.info('DONE.');
               });
             });
           });
