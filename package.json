@@ -1,31 +1,26 @@
 {
-  "name": "node-builder",
+  "name": "node-constructor",
   "version": "0.0.1",
   "description": "Simple script to build Node.js JavaScript code into binary executable",
-  "main": "node-builder.js",
+  "main": "index.js",
   "dependencies": {
-    "optimist": "~0.3.5"
+    "optimist": "*"
   },
   "devDependencies": {},
   "repository": {
     "type": "git",
-    "url": "git://github.com/jheusala/node-builder.git"
+    "url": "https://github.com/zyxar/node-constructor.git"
   },
   "keywords": [
     "build",
     "standalone",
     "third_party_main"
   ],
-  "author": "Jaakko-Heikki Heusala",
-  "contributors": [
-    {
-      "name"  : "Luis Nabais",
-      "email" : "Luis.Nabais@cultofbits.com"
-    }
-  ],
+  "author": "Markus Tzoe",
+  "contributors": [],
   "license": "MIT",
   "readmeFilename": "README.md",
   "engines": {
-    "node": ">=0.6"
+    "node": ">=0.10"
   }
 }
